@@ -1,8 +1,8 @@
--module(cougar_svr).
+-module(cougar).
 
 -behaviour(gen_server).
 
--export([save/1]).
+-export([write/1]).
 
 -export([start/1, stop/0]).
 
@@ -15,8 +15,8 @@
           buffer,
           timer }).
 
-save(Data) ->
-    gen_server:call(?MODULE, {save, Data}).
+write(Data) ->
+    gen_server:call(?MODULE, {write, Data}).
 
 start(Args) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []).
@@ -27,21 +27,21 @@ stop() ->
 
 %%% Callback Functions %%%
 
-init([DataStore, MaxBufferSize, FlushTimerTimeout]) ->
+init([DetsTable, MaxBufferSize, FlushTimerTimeout]) ->
     State = #cougar_state{ max_buffer_size = MaxBufferSize,
                            flush_timer_timeout = FlushTimerTimeout,
-                           data_store = DataStore },
+                           data_store = DetsTable },
     {ok, reset(State)}.
 
 
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
 
-handle_call({save, Data}, _From, State = #cougar_state{ max_buffer_size = 0 }) ->
+handle_call({write, Data}, _From, State = #cougar_state{ max_buffer_size = 0 }) ->
     {Reply, NewState} = increment(Data, State),
     {reply, Reply, NewState};
 
-handle_call({save, Data}, _From, State = #cougar_state{ max_buffer_size = Max }) ->
+handle_call({write, Data}, _From, State = #cougar_state{ max_buffer_size = Max }) ->
     {Reply, NewState} =
         case buffer_size(State#cougar_state.buffer) of
             Size when Size < Max -> increment(Data, State);
@@ -68,8 +68,9 @@ reset(State = #cougar_state{ flush_timer_timeout = Timeout }) ->
     State#cougar_state{ buffer=buffer_new(), timer=TRef }.
 
 
-flush(State = #cougar_state{ data_store = DataStore, buffer = Dict }) ->
-    Reply = db_insert_bulk(DataStore, buffer_to_list(Dict)),
+flush(State = #cougar_state{ data_store = DetsTable, buffer = Dict }) ->
+    io:format("++++++++++++++++++++++++++ flush +++++++++++++++++++++++\n"),
+    Reply = db_insert_bulk(DetsTable, buffer_to_list(Dict)),
     {Reply, reset(State)}.
 
 
@@ -77,11 +78,11 @@ increment(Data, State = #cougar_state{ buffer = Dict }) ->
     NewState = State#cougar_state{ buffer=buffer_update_counter(Data, 1, Dict) },
     {ok, NewState}.
 
-db_insert_bulk(DataStore, Data) ->
+db_insert_bulk(DetsTable, Data) ->
     % Rudimentary 'db' update.
-    [ (update_counter(dets))(Key, Incr, DataStore) 
+    [ (update_counter(dets))(Key, Incr, DetsTable) 
       || {Key, Incr} <- Data ],
-    dets:sync(DataStore).
+    dets:sync(DetsTable).
 
 update_counter(Type) ->
     fun (Key, Incr, TypeInstance) ->
